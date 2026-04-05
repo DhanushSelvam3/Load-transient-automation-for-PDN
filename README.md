@@ -1,7 +1,7 @@
 This Python-based automation script tests the stability of a Power Distribution Network (PDN) in Dynamic transient test in the rails (here i have taken 3.6V ,1.8, 3.3V & 2.5V rails)
 
 Overview
-1) The script configures your Electronic Load to pulse current and your Oscilloscope to capture the peak overshoot &b undershoot
+1) The script configures your Electronic Load to pulse current and your Oscilloscope to capture the peak overshoot & undershoot
 2) It triggers a load jump from 10% to 90% load in a specified slew rate and captures the voltage waveform.
 3) It queries the Scope for the exact Peak (Vmax) and Dip (Vmin) to check if they stay within your defined 5% tolerance.
 4) It saves the raw signal data as a CSV file for deep analysis.
