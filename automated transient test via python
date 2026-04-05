@@ -1,0 +1,83 @@
+import pyvisa
+import pandas as pd
+import time
+from datetime import datetime
+RAILS = {
+    "+3V6": {"nom_v": 3.6, "i_full_load": 2.5, "tolerance": 0.05},
+    "+1V8": {"nom_v": 1.8, "i_full_load": 3.0, "tolerance": 0.05},
+    "+3V3": {"nom_v": 3.3, "i_full_load": 3.0, "tolerance": 0.05},
+    "+2V5": {"nom_v": 2.5, "i_full_load": 1.5, "tolerance": 0.05}
+}
+class PDNLoadTransientTest:
+    def __init__(self):
+        self.rm = pyvisa.ResourceManager()
+        self.instruments = {}
+        self.test_logs = []
+    def init_instruments(self, load_addr, scope_addr):
+        self.load = self.rm.open_resource(load_addr)
+        self.scope = self.rm.open_resource(scope_addr)
+        print("System: Instruments Initialized.")
+    def run_sequential_test(self):
+        for rail_name, specs in RAILS.items():
+            print(f"\n Testing Rail: {rail_name}")
+            # limit cal
+            v_nom = specs['nom_v']
+            v_upper = v_nom * (1 + specs['tolerance'])
+            v_lower = v_nom * (1 - specs['tolerance'])
+            # Transient settings: 10% to 90% load step as a baseline
+            i_start = specs['i_full_load'] * 0.1
+            i_stop = specs['i_full_load'] * 0.9
+            try:
+                # Configure Electronic Load
+                self.load.write(f"CURR:STAT:L1 {i_start}")
+                self.load.write(f"CURR:STAT:L2 {i_stop}")
+                self.load.write("CURR:TRAN:SLEW 2.5") 
+                self.load.write("TRAN ON")
+                # Configure Oscilloscope
+                self.scope.write(f"CHAN1:SCAL {v_nom * 0.05}") 
+                self.scope.write("TRIG:SOUR CHAN2")
+                time.sleep(2)
+                # Capture Measurements
+                v_max = float(self.scope.query("MEAS:VMAX? CHAN1"))
+                v_min = float(self.scope.query("MEAS:VMIN? CHAN1"))
+                v_ripple = float(self.scope.query("MEAS:VPP? CHAN1"))
+                # saving waveform
+                raw_waveform = self.scope.query_binary_values("WAV:DATA?", datatype='f')
+                with open(f"{rail_name}_waveform.csv", "w") as f:
+                f.write(",".join(map(str, raw_waveform)))
+                #Acceptance Criteria 
+                is_pass = (v_max <= v_upper) and (v_min >= v_lower)
+                status = "PASS" if is_pass else "FAIL"
+                # Logging
+                entry = {
+                    "PDN_Rail": rail_name,
+                    "Nominal_Voltage": v_nom,
+                    "Peack-overshoot": round(v_max, 3),
+                    "Peak_undershoot": round(v_min, 3),
+                    "Tolerance_Band": f"{v_lower}V - {v_upper}V",
+                    "Status": status,
+                    "Timestamp": datetime.now().strftime("%H:%M:%S")
+                }
+                self.test_logs.append(entry)
+                print(f"Result: {status} [Max: {v_max}V, Min: {v_min}V]")
+            except Exception as e:
+                print(f"Error testing {rail_name}: {e}")
+            finally:
+                self.load.write("TRAN OFF")
+
+    def generate_csv_report(self):
+        df = pd.DataFrame(self.test_logs)
+        filename = f"PDN_Transient_Report_{datetime.now().strftime('%Y%m%d')}.csv"
+        df.to_csv(filename, index=False)
+        print(f"\nReport generated: {filename}")
+        print(df[['Rail', 'Nominal_V', 'Status']])
+        print(f"Total Rails Tested: {len(df)}")
+        print(f"Pass Rate: {(df['Status'] == 'PASS').sum() / len(df) * 100}%")
+        print(f"Average Deviation: {df['Measured_Max'].mean() - df['Nominal_V'].mean()}V")
+#  Execution
+if __name__ == "__main__":
+    tester = PDNLoadTransientTest()
+    # Replace with actual VISA resource strings
+    tester.init_instruments('GPIB0::3::INSTR', 'USB0::0x0957::0x17A6::MY52090122::0::INSTR')
+    tester.run_sequential_test()
+    tester.generate_csv_report()
